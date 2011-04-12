@@ -28,6 +28,12 @@ SRCS += OpenMax.cpp \
 
 endif
 
+ifeq (@USE_GSTREAMER@,1)
+SRCS += GstDecoder.cpp \
+        DVDVideoCodecGStreamer.cpp \
+
+endif
+
 LIB=Video.a
 
 include @abs_top_srcdir@/Makefile.include
