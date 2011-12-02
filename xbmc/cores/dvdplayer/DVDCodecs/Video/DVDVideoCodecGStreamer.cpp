@@ -26,10 +26,32 @@
 #include "DVDVideoCodecGStreamer.h"
 #include "DVDStreamInfo.h"
 #include "DVDClock.h"
+#include "windowing/WindowingFactory.h"
 #include <gst/app/gstappsrc.h>
 #include <gst/app/gstappsink.h>
+#include <EGL/egl.h>
 
 bool CDVDVideoCodecGStreamer::gstinitialized = false;
+
+
+#ifndef EGLIMAGE_FLAGS_YUV_CONFORMANT_RANGE
+// XXX these should come from some egl header??
+#define EGLIMAGE_FLAGS_YUV_CONFORMANT_RANGE (0 << 0)
+#define EGLIMAGE_FLAGS_YUV_FULL_RANGE       (1 << 0)
+#define EGLIMAGE_FLAGS_YUV_BT601            (0 << 1)
+#define EGLIMAGE_FLAGS_YUV_BT709            (1 << 1)
+#endif
+#ifndef EGL_TI_raw_video
+#  define EGL_TI_raw_video 1
+#  define EGL_RAW_VIDEO_TI            0x333A  /* eglCreateImageKHR target */
+#  define EGL_GL_VIDEO_FOURCC_TI        0x3331  /* eglCreateImageKHR attribute */
+#  define EGL_GL_VIDEO_WIDTH_TI         0x3332  /* eglCreateImageKHR attribute */
+#  define EGL_GL_VIDEO_HEIGHT_TI        0x3333  /* eglCreateImageKHR attribute */
+#  define EGL_GL_VIDEO_BYTE_STRIDE_TI     0x3334  /* eglCreateImageKHR attribute */
+#  define EGL_GL_VIDEO_BYTE_SIZE_TI       0x3335  /* eglCreateImageKHR attribute */
+#  define EGL_GL_VIDEO_YUV_FLAGS_TI       0x3336  /* eglCreateImageKHR attribute */
+#endif
+
 
 CDVDVideoCodecGStreamer::CDVDVideoCodecGStreamer()
 {
@@ -46,9 +68,16 @@ CDVDVideoCodecGStreamer::CDVDVideoCodecGStreamer()
   m_needData = false;
   m_AppSrc = NULL;
   m_AppSrcCaps = NULL;
+  m_AppSinkCaps = NULL;
   m_ptsinvalid = true;
 
   m_timebase = 1000.0;
+
+  eglCreateImageKHR = (PFNEGLCREATEIMAGEKHRPROC)
+      eglGetProcAddress("eglCreateImageKHR");
+  eglDestroyImageKHR = (PFNEGLDESTROYIMAGEKHRPROC)
+      eglGetProcAddress("eglDestroyImageKHR");
+
 }
 
 CDVDVideoCodecGStreamer::~CDVDVideoCodecGStreamer()
@@ -105,6 +134,12 @@ void CDVDVideoCodecGStreamer::Dispose()
     m_AppSrcCaps = NULL;
   }
 
+  if (m_AppSinkCaps)
+  {
+    gst_caps_unref(m_AppSinkCaps);
+    m_AppSinkCaps = NULL;
+  }
+
   if (m_decoder)
   {
     m_decoder->StopThread();
@@ -155,6 +190,7 @@ int CDVDVideoCodecGStreamer::Decode(BYTE* pData, int iSize, double dts, double p
 
 void CDVDVideoCodecGStreamer::Reset()
 {
+  m_crop = false;
 }
 
 bool CDVDVideoCodecGStreamer::GetPicture(DVDVideoPicture* pDvdVideoPicture)
@@ -175,35 +211,97 @@ bool CDVDVideoCodecGStreamer::GetPicture(DVDVideoPicture* pDvdVideoPicture)
     return false;
   }
 
-  GstStructure *structure = gst_caps_get_structure (caps, 0);
-  int width = 0, height = 0;
-  if (structure == NULL ||
-      !gst_structure_get_int (structure, "width", (int *) &width) ||
-      !gst_structure_get_int (structure, "height", (int *) &height))
+  if (caps != m_AppSinkCaps)
   {
-    printf("GStreamer: invalid caps on decoded buffer\n");
-    return false;
+    if (m_AppSinkCaps)
+      gst_caps_unref(m_AppSinkCaps);
+
+    m_AppSinkCaps = caps;
+
+    GstStructure *structure = gst_caps_get_structure (caps, 0);
+    if (structure == NULL ||
+        !gst_structure_get_int (structure, "width", &m_width) ||
+        !gst_structure_get_int (structure, "height", &m_height) ||
+        !gst_structure_get_fourcc (structure, "format", &m_format))
+    {
+      printf("GStreamer: invalid caps on decoded buffer\n");
+      gst_caps_unref(m_AppSinkCaps);
+      m_AppSinkCaps = NULL;
+      return false;
+    }
+
+    /* we could probably even lift this restriction on color formats
+     * (note: update caps filter in gst pipeline if you do).. this
+     * might make sense on OMAP3 where DSP codecs might be returning
+     * YUY2/UYVY.. at least if we are using eglimageexternal/
+     * texture streaming, the SGX can directly render YUY2/UYVY
+     *
+     * XXX if using eglImage, we need some way to query supported YUV
+     * formats..
+     */
+    if ((m_format != GST_STR_FOURCC("NV12")) &&
+        (m_format != GST_STR_FOURCC("I420")))
+    {
+      printf("GStreamer: invalid color format on decoded buffer\n");
+      gst_caps_unref(m_AppSinkCaps);
+      m_AppSinkCaps = NULL;
+      return false;
+    }
+  }
+  else
+  {
+    gst_caps_unref(caps);
   }
 
-  pDvdVideoPicture->iDisplayWidth  = pDvdVideoPicture->iWidth  = width;
-  pDvdVideoPicture->iDisplayHeight = pDvdVideoPicture->iHeight = height;
+  pDvdVideoPicture->iWidth  = m_width;
+  pDvdVideoPicture->iHeight = m_height;
 
-  pDvdVideoPicture->format = DVDVideoPicture::FMT_YUV420P;
+  if (m_crop)
+  {
+    pDvdVideoPicture->iDisplayWidth  = m_cropWidth;
+    pDvdVideoPicture->iDisplayHeight = m_cropHeight;
+    pDvdVideoPicture->iDisplayX      = m_cropLeft;
+    pDvdVideoPicture->iDisplayY      = m_cropTop;
+  }
+  else
+  {
+    pDvdVideoPicture->iDisplayWidth  = pDvdVideoPicture->iWidth;
+    pDvdVideoPicture->iDisplayHeight = pDvdVideoPicture->iHeight;
+    pDvdVideoPicture->iDisplayX      = 0;
+    pDvdVideoPicture->iDisplayY      = 0;
+  }
 
-#define ALIGN(x, n) (((x) + (n) - 1) & (~((n) - 1)))
-  pDvdVideoPicture->data[0] = m_pictureBuffer->data;
-  pDvdVideoPicture->iLineSize[0] = ALIGN (width, 4);
-  pDvdVideoPicture->data[1] = pDvdVideoPicture->data[0] + pDvdVideoPicture->iLineSize[0] * ALIGN (height, 2);
-  pDvdVideoPicture->iLineSize[1] = ALIGN (width, 8) / 2;
-  pDvdVideoPicture->data[2] = pDvdVideoPicture->data[1] + pDvdVideoPicture->iLineSize[1] * ALIGN (height, 2) / 2;
-  pDvdVideoPicture->iLineSize[2] = pDvdVideoPicture->iLineSize[1];
-  g_assert (pDvdVideoPicture->data[2] + pDvdVideoPicture->iLineSize[2] * ALIGN (height, 2) / 2 == pDvdVideoPicture->data[0] + m_pictureBuffer->size);
-#undef ALIGN
-
-  pDvdVideoPicture->pts = (double)GST_BUFFER_TIMESTAMP(m_pictureBuffer) / 1000.0;
+  pDvdVideoPicture->decoder = this;
+  pDvdVideoPicture->origBuf = m_pictureBuffer;
+  pDvdVideoPicture->format  = DVDVideoPicture::FMT_EGLIMG;
+  pDvdVideoPicture->pts       = (double)GST_BUFFER_TIMESTAMP(m_pictureBuffer) / 1000.0;
   pDvdVideoPicture->iDuration = (double)GST_BUFFER_DURATION(m_pictureBuffer) / 1000.0;
 
   return true;
+}
+
+EGLImageKHR CDVDVideoCodecGStreamer::GetEGLImage(void *origBuf)
+{
+  GstBuffer *buf = gst_buffer_ref((GstBuffer *)origBuf);
+  EGLint attr[] = {
+      EGL_GL_VIDEO_FOURCC_TI,      m_format,
+      EGL_GL_VIDEO_WIDTH_TI,       m_width,
+      EGL_GL_VIDEO_HEIGHT_TI,      m_height,
+      EGL_GL_VIDEO_BYTE_SIZE_TI,   GST_BUFFER_SIZE(buf),
+      // TODO: pick proper YUV flags..
+      EGL_GL_VIDEO_YUV_FLAGS_TI,   EGLIMAGE_FLAGS_YUV_CONFORMANT_RANGE |
+                                   EGLIMAGE_FLAGS_YUV_BT601,
+      EGL_NONE
+  };
+  return eglCreateImageKHR(g_Windowing.GetEGLDisplay(),
+      EGL_NO_CONTEXT, EGL_RAW_VIDEO_TI, GST_BUFFER_DATA(buf), attr);
+}
+
+void CDVDVideoCodecGStreamer::ReleaseEGLImage(EGLImageKHR eglImage, void *origBuf)
+{
+  GstBuffer *buf = (GstBuffer *)origBuf;
+  eglDestroyImageKHR(g_Windowing.GetEGLDisplay(), eglImage);
+  gst_buffer_unref(buf);
 }
 
 void CDVDVideoCodecGStreamer::SetDropState(bool bDrop)
@@ -215,8 +313,21 @@ const char *CDVDVideoCodecGStreamer::GetName()
   return "GStreamer";
 }
 
+void CDVDVideoCodecGStreamer::OnCrop(gint top, gint left, gint width, gint height)
+{
+  m_crop = true;
+  m_cropTop = top;
+  m_cropLeft = left;
+  m_cropWidth = width;
+  m_cropHeight = height;
+}
+
 void CDVDVideoCodecGStreamer::OnDecodedBuffer(GstBuffer *buffer)
 {
+  /* throttle decoding if rendering is not keeping up.. */
+  while (m_pictureQueue.size() > 4)
+    usleep(1000);
+
   if (buffer)
   {
     CSingleLock lock(m_monitorLock);

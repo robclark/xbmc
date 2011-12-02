@@ -172,7 +172,7 @@ CDVDVideoCodec* CDVDFactoryCodec::CreateVideoCodec(CDVDStreamInfo &hint, unsigne
   CLog::Log(LOGDEBUG, "CDVDFactoryCodec: compiled in hardware support: %s", hwSupport.c_str());
 
 #if defined(HAVE_LIBGSTREAMER)
-  if (/*hint.codec == CODEC_ID_H264*/true)
+  if (!hint.software)
   {
       CLog::Log(LOGINFO, "Trying GStreamer Video Decoder...");
       if ( (pCodec = OpenCodec(new CDVDVideoCodecGStreamer(), hint, options)) ) return pCodec;

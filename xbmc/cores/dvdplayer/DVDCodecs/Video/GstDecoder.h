@@ -27,6 +27,7 @@
 class IGstDecoderCallback
 {
 public:
+  virtual void OnCrop(gint top, gint left, gint width, gint height) = 0;
   virtual void OnDecodedBuffer(GstBuffer *buffer) = 0;
   virtual void OnNeedData() = 0;
   virtual void OnEnoughData() = 0;
@@ -45,6 +46,7 @@ protected:
   virtual void Process();
 
 private:
+  static void OnCrop(GstElement *appsink, gint top, gint left, gint width, gint height, void *data);
   static void OnDecodedBuffer(GstElement *appsink, void *data);
   static void OnNeedData(GstElement *appsrc, guint size, void *data);
   static void OnEnoughData (GstElement *appsrc, void *data);

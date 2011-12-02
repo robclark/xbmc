@@ -48,7 +48,7 @@ GstElement *CGstDecoder::Open(GstCaps *sourceCapabilities)
 
   printf("GStreamer: The capabilities from source are %s\n", capsString);
 
-  gchar *pipelineString = g_strdup_printf("appsrc caps=\"%s\" name=\"AppSrc\" ! decodebin2 ! ffmpegcolorspace ! appsink caps=\"video/x-raw-yuv,format=(fourcc)I420\" name=\"AppSink\"", capsString);
+  gchar *pipelineString = g_strdup_printf("appsrc caps=\"%s\" name=\"AppSrc\" ! decodebin2 ! ffmpegcolorspace ! appsink caps=\"video/x-raw-yuv,format=(fourcc){I420,NV12}\" name=\"AppSink\"", capsString);
 
   printf("GStreamer: Entire pipeline is %s\n", pipelineString);
 
@@ -77,6 +77,7 @@ GstElement *CGstDecoder::Open(GstCaps *sourceCapabilities)
   if (AppSink)
   {
     g_object_set(G_OBJECT(AppSink), "emit-signals", TRUE, "sync", FALSE, NULL);
+    g_signal_connect(AppSink, "crop", G_CALLBACK(CGstDecoder::OnCrop), this);
     g_signal_connect(AppSink, "new-buffer", G_CALLBACK(CGstDecoder::OnDecodedBuffer), this);
     gst_object_unref(AppSink);
   }
@@ -101,6 +102,13 @@ void CGstDecoder::Process()
   g_main_loop_run(m_loop);
 
   gst_element_set_state(m_pipeline, GST_STATE_NULL);
+}
+
+void CGstDecoder::OnCrop(GstElement *appsink, gint top, gint left, gint width, gint height, void *data)
+{
+  CGstDecoder *decoder = (CGstDecoder *)data;
+  if (decoder->m_callback)
+    decoder->m_callback->OnCrop(top, left, width, height);
 }
 
 void CGstDecoder::OnDecodedBuffer(GstElement *appsink, void *data)

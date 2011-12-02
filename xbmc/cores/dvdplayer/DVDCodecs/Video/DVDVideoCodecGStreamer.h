@@ -39,9 +39,12 @@ public:
   virtual int Decode(BYTE* pData, int iSize, double dts, double pts);
   virtual void Reset();
   virtual bool GetPicture(DVDVideoPicture* pDvdVideoPicture);
+  virtual EGLImageKHR GetEGLImage(void *origBuf);
+  virtual void ReleaseEGLImage(EGLImageKHR eglImage, void *origBuf);
   virtual void SetDropState(bool bDrop);
   virtual const char* GetName();
 
+  void OnCrop(gint top, gint left, gint width, gint height);
   void OnDecodedBuffer(GstBuffer *buffer);
   void OnNeedData();
   void OnEnoughData();
@@ -52,6 +55,17 @@ private:
   static bool gstinitialized;
 
   bool m_initialized;
+
+  // crop parameters
+  bool m_crop;
+  gint m_cropTop, m_cropLeft, m_cropWidth, m_cropHeight;
+
+  // caps parameters:
+  gint m_width, m_height;
+  guint32 m_format;
+
+  // sink caps:
+  GstCaps *m_AppSinkCaps;
 
   std::queue<GstBuffer *> m_pictureQueue;
   GstBuffer *m_pictureBuffer;
@@ -66,4 +80,8 @@ private:
 
   bool m_needData;
   bool m_ptsinvalid;
+
+
+  PFNEGLCREATEIMAGEKHRPROC eglCreateImageKHR;
+  PFNEGLDESTROYIMAGEKHRPROC eglDestroyImageKHR;
 };

@@ -164,6 +164,36 @@ namespace Shaders {
   };
 #endif
 
+  class EGLImageExternalShader : public BaseYUV2RGBShader, public CGLSLShaderProgram
+  {
+  public:
+    EGLImageExternalShader();
+    virtual void SetWidth(int w)     { m_width  = w; }
+    virtual void SetHeight(int h)    { m_height = h; }
+    virtual GLint GetVertexLoc() { return m_hVertex; }
+    virtual GLint GetYcoordLoc() { return m_hYcoord; }
+
+    virtual void SetMatrices(GLfloat *p, GLfloat *m) { m_proj = p; m_model = m; }
+    virtual void SetAlpha(GLfloat alpha) { m_alpha = alpha; }
+
+  protected:
+    void OnCompiledAndLinked();
+    bool OnEnabled();
+
+    string m_defines;
+    int   m_width;
+    int   m_height;
+    GLint m_hYTex;
+    GLint m_hVertex;
+    GLint m_hYcoord;
+    GLint m_hProj;
+    GLint m_hModel;
+    GLint m_hAlpha;
+    GLfloat *m_proj;
+    GLfloat *m_model;
+    GLfloat  m_alpha;
+  };
+
   class YUV2RGBProgressiveShader : public BaseYUV2RGBGLSLShader
   {
   public:
