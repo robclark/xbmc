@@ -356,7 +356,16 @@ GstCaps *CDVDVideoCodecGStreamer::CreateVideoCaps(CDVDStreamInfo &hints, CDVDCod
     case CODEC_ID_H264:
       caps = gst_caps_new_simple ("video/x-h264", NULL);
       break;
-
+    case CODEC_ID_MPEG4:
+      caps = gst_caps_new_simple ("video/mpeg", NULL);
+      if (caps)
+      {
+        gst_caps_set_simple(caps,
+            "mpegversion", G_TYPE_INT, 4,
+            "systemstream", G_TYPE_BOOLEAN, false,
+            NULL);
+      }
+      break;
     default:
       printf("GStreamer: codec: unkown = %i\n", hints.codec);
       break;
