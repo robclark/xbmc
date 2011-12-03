@@ -135,11 +135,11 @@ CLinuxRendererGLES::CLinuxRendererGLES()
 void CLinuxRendererGLES::UnRefBuf(int index)
 {
   YUVBUFFER &buf = m_buffers[index];
-  if (buf.eglImage)
-    buf.decoder->ReleaseEGLImage(buf.eglImage, buf.origBuf);
-  buf.eglImage = NULL;
-  buf.origBuf = NULL;
-  buf.decoder = NULL;
+  if (buf.eglImageHandle)
+  {
+    delete buf.eglImageHandle;
+    buf.eglImageHandle = NULL;
+  }
 }
 
 CLinuxRendererGLES::~CLinuxRendererGLES()
@@ -303,7 +303,7 @@ void CLinuxRendererGLES::CalculateTextureSourceRects(int source, int num_planes)
   YUVFIELDS& fields =  buf.fields;
 
   // calculate the source rectangle
-  for(int field = 0; field < (buf.eglImage ? 1 : 3); field++)
+  for(int field = 0; field < (buf.eglImageHandle ? 1 : 3); field++)
   {
     for(int plane = 0; plane < num_planes; plane++)
     {
@@ -704,7 +704,6 @@ void CLinuxRendererGLES::LoadShaders(int field)
     case RENDER_METHOD_SOFTWARE:
     default:
       {
-printf("fail SW!!\n");
         // Use software YUV 2 RGB conversion if user requested it or GLSL failed
         m_renderMethod = RENDER_SW ;
         CLog::Log(LOGNOTICE, "GL: Using software color conversion/RGBA rendering");
@@ -860,7 +859,7 @@ void CLinuxRendererGLES::RenderSinglePass(int index, int field)
   glEnable(m_textureTarget);
   glBindTexture(m_textureTarget, planes[0].id);
 
-  if (!buf.eglImage)
+  if (!buf.eglImageHandle)
   {
     // U
     glActiveTexture(GL_TEXTURE1);
@@ -900,7 +899,7 @@ void CLinuxRendererGLES::RenderSinglePass(int index, int field)
 
   glVertexAttribPointer(vertLoc, 3, GL_FLOAT, 0, 0, m_vert);
   glVertexAttribPointer(Yloc, 2, GL_FLOAT, 0, 0, m_tex[0]);
-  if (!buf.eglImage)
+  if (!buf.eglImageHandle)
   {
     glVertexAttribPointer(Uloc, 2, GL_FLOAT, 0, 0, m_tex[1]);
     glVertexAttribPointer(Vloc, 2, GL_FLOAT, 0, 0, m_tex[2]);
@@ -908,7 +907,7 @@ void CLinuxRendererGLES::RenderSinglePass(int index, int field)
 
   glEnableVertexAttribArray(vertLoc);
   glEnableVertexAttribArray(Yloc);
-  if (!buf.eglImage)
+  if (!buf.eglImageHandle)
   {
     glEnableVertexAttribArray(Uloc);
     glEnableVertexAttribArray(Vloc);
@@ -922,7 +921,7 @@ void CLinuxRendererGLES::RenderSinglePass(int index, int field)
   m_vert[0][2] = m_vert[1][2] = m_vert[2][2] = m_vert[3][2] = 0.0f;
 
   // Setup texture coordinates
-  for (int i = 0; i < (buf.eglImage ? 1 : 3); i++)
+  for (int i = 0; i < (buf.eglImageHandle ? 1 : 3); i++)
   {
     m_tex[i][0][0] = m_tex[i][3][0] = planes[i].rect.x1;
     m_tex[i][0][1] = m_tex[i][1][1] = planes[i].rect.y1;
@@ -939,7 +938,7 @@ void CLinuxRendererGLES::RenderSinglePass(int index, int field)
 
   glDisableVertexAttribArray(vertLoc);
   glDisableVertexAttribArray(Yloc);
-  if (!buf.eglImage)
+  if (!buf.eglImageHandle)
   {
     glDisableVertexAttribArray(Uloc);
     glDisableVertexAttribArray(Vloc);
@@ -1155,9 +1154,6 @@ abort();
 void CLinuxRendererGLES::RenderSoftware(int index, int field)
 {
   YUVPLANES &planes = m_buffers[index].fields[field];
-
-// XXX for debugging
-abort();
 
   glDisable(GL_DEPTH_TEST);
 
@@ -1407,16 +1403,13 @@ void CLinuxRendererGLES::UploadEGLIMAGETexture(int index)
   if (!(im.flags&IMAGE_FLAG_READY))
 #endif
   {
-printf("fail READY!\n");
     m_eventTexturesDone[index]->Set();
     return;
   }
 
   glEnable(m_textureTarget);
   glBindTexture(m_textureTarget, plane.id);
-  glEGLImageTargetTexture2DOES(m_textureTarget, buf.eglImage);
-
-  // XXX deal with cropping!!
+  glEGLImageTargetTexture2DOES(m_textureTarget, buf.eglImageHandle->Get());
 
   VerifyGLState();
 
@@ -1430,7 +1423,6 @@ printf("fail READY!\n");
 void CLinuxRendererGLES::DeleteEGLIMAGETexture(int index)
 {
   YUVBUFFER &buf    = m_buffers[index];
-  YV12Image &im     = buf.image;
   YUVFIELDS &fields = buf.fields;
   YUVPLANE  &plane  = fields[0][0];   /* for eglimageexternal, use only one texture */
 
@@ -1453,7 +1445,6 @@ void CLinuxRendererGLES::DeleteEGLIMAGETexture(int index)
 bool CLinuxRendererGLES::CreateEGLIMAGETexture(int index)
 {
   YUVBUFFER &buf    = m_buffers[index];
-  YV12Image &im     = buf.image;
   YUVFIELDS &fields = buf.fields;
   YUVPLANE  &plane  = fields[0][0];   /* for eglimageexternal, use only one texture */
 
@@ -1937,7 +1928,7 @@ void CLinuxRendererGLES::SetTextureFilter(GLenum method)
       glTexParameteri(m_textureTarget, GL_TEXTURE_MAG_FILTER, method);
       VerifyGLState();
 
-      if (!((m_renderMethod & RENDER_SW) || buf.eglImage))
+      if (!((m_renderMethod & RENDER_SW) || buf.eglImageHandle))
       {
         glBindTexture(m_textureTarget, fields[f][1].id);
         glTexParameteri(m_textureTarget, GL_TEXTURE_MIN_FILTER, method);
@@ -2081,9 +2072,8 @@ void CLinuxRendererGLES::AddProcessor(DVDVideoPicture *picture)
   im.height     = m_sourceHeight;
   im.cshift_x   = 1;
   im.cshift_y   = 1;
-  buf.origBuf   = picture->origBuf;
-  buf.decoder   = picture->decoder;
-  buf.eglImage  = buf.decoder->GetEGLImage(buf.origBuf);
+  buf.eglImageHandle = picture->eglImageHandle;
+  picture->eglImageHandle = NULL;
 
   plane.texwidth  = im.width;
   plane.texheight = im.height;

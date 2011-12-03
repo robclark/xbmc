@@ -255,9 +255,7 @@ protected:
     YV12Image image;
     unsigned  flipindex; /* used to decide if this has been uploaded */
 
-    EGLImageKHR eglImage;
-    void *origBuf;
-    CDVDVideoCodec *decoder;
+    EGLImageHandle *eglImageHandle;
 
 #ifdef HAVE_LIBOPENMAX
     OpenMaxVideoBuffer *openMaxBuffer;

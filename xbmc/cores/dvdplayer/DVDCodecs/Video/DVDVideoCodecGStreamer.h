@@ -39,8 +39,6 @@ public:
   virtual int Decode(BYTE* pData, int iSize, double dts, double pts);
   virtual void Reset();
   virtual bool GetPicture(DVDVideoPicture* pDvdVideoPicture);
-  virtual EGLImageKHR GetEGLImage(void *origBuf);
-  virtual void ReleaseEGLImage(EGLImageKHR eglImage, void *origBuf);
   virtual void SetDropState(bool bDrop);
   virtual const char* GetName();
 
@@ -80,8 +78,4 @@ private:
 
   bool m_needData;
   bool m_ptsinvalid;
-
-
-  PFNEGLCREATEIMAGEKHRPROC eglCreateImageKHR;
-  PFNEGLDESTROYIMAGEKHRPROC eglDestroyImageKHR;
 };

@@ -33,6 +33,9 @@
 
 bool CDVDVideoCodecGStreamer::gstinitialized = false;
 
+static PFNEGLCREATEIMAGEKHRPROC eglCreateImageKHR;
+static PFNEGLDESTROYIMAGEKHRPROC eglDestroyImageKHR;
+
 
 #ifndef EGLIMAGE_FLAGS_YUV_CONFORMANT_RANGE
 // XXX these should come from some egl header??
@@ -52,6 +55,56 @@ bool CDVDVideoCodecGStreamer::gstinitialized = false;
 #  define EGL_GL_VIDEO_YUV_FLAGS_TI       0x3336  /* eglCreateImageKHR attribute */
 #endif
 
+class GSTEGLImageHandle : public EGLImageHandle
+{
+public:
+  GSTEGLImageHandle(GstBuffer *buf, gint width, gint height, guint32 format)
+  {
+    this->eglImage = NULL;
+    this->buf = buf;
+    this->width = width;
+    this->height = height;
+    this->format = format;
+  }
+
+  virtual ~GSTEGLImageHandle()
+  {
+    if (eglImage)
+    {
+      eglDestroyImageKHR(g_Windowing.GetEGLDisplay(), eglImage);
+      gst_buffer_unref(buf);
+    }
+  }
+
+protected:
+  virtual EGLImageKHR Get()
+  {
+    if (!eglImage)
+    {
+      GstBuffer *buf = gst_buffer_ref(this->buf);
+      EGLint attr[] = {
+          EGL_GL_VIDEO_FOURCC_TI,      format,
+          EGL_GL_VIDEO_WIDTH_TI,       width,
+          EGL_GL_VIDEO_HEIGHT_TI,      height,
+          EGL_GL_VIDEO_BYTE_SIZE_TI,   GST_BUFFER_SIZE(buf),
+          // TODO: pick proper YUV flags..
+          EGL_GL_VIDEO_YUV_FLAGS_TI,   EGLIMAGE_FLAGS_YUV_CONFORMANT_RANGE |
+          EGLIMAGE_FLAGS_YUV_BT601,
+          EGL_NONE
+      };
+      eglImage = eglCreateImageKHR(g_Windowing.GetEGLDisplay(),
+          EGL_NO_CONTEXT, EGL_RAW_VIDEO_TI, GST_BUFFER_DATA(buf), attr);
+    }
+    return eglImage;
+  }
+
+private:
+  EGLImageKHR eglImage;
+  gint width, height;
+  guint32 format;
+  GstBuffer *buf;
+};
+
 
 CDVDVideoCodecGStreamer::CDVDVideoCodecGStreamer()
 {
@@ -59,6 +112,11 @@ CDVDVideoCodecGStreamer::CDVDVideoCodecGStreamer()
  {
     gst_init (NULL, NULL);
     gstinitialized = true;
+
+    eglCreateImageKHR = (PFNEGLCREATEIMAGEKHRPROC)
+        eglGetProcAddress("eglCreateImageKHR");
+    eglDestroyImageKHR = (PFNEGLDESTROYIMAGEKHRPROC)
+        eglGetProcAddress("eglDestroyImageKHR");
   }
 
   m_initialized = false;
@@ -72,12 +130,6 @@ CDVDVideoCodecGStreamer::CDVDVideoCodecGStreamer()
   m_ptsinvalid = true;
 
   m_timebase = 1000.0;
-
-  eglCreateImageKHR = (PFNEGLCREATEIMAGEKHRPROC)
-      eglGetProcAddress("eglCreateImageKHR");
-  eglDestroyImageKHR = (PFNEGLDESTROYIMAGEKHRPROC)
-      eglGetProcAddress("eglDestroyImageKHR");
-
 }
 
 CDVDVideoCodecGStreamer::~CDVDVideoCodecGStreamer()
@@ -271,37 +323,12 @@ bool CDVDVideoCodecGStreamer::GetPicture(DVDVideoPicture* pDvdVideoPicture)
     pDvdVideoPicture->iDisplayY      = 0;
   }
 
-  pDvdVideoPicture->decoder = this;
-  pDvdVideoPicture->origBuf = m_pictureBuffer;
+  pDvdVideoPicture->eglImageHandle = new GSTEGLImageHandle(m_pictureBuffer, m_width, m_height, m_format);
   pDvdVideoPicture->format  = DVDVideoPicture::FMT_EGLIMG;
   pDvdVideoPicture->pts       = (double)GST_BUFFER_TIMESTAMP(m_pictureBuffer) / 1000.0;
   pDvdVideoPicture->iDuration = (double)GST_BUFFER_DURATION(m_pictureBuffer) / 1000.0;
 
   return true;
-}
-
-EGLImageKHR CDVDVideoCodecGStreamer::GetEGLImage(void *origBuf)
-{
-  GstBuffer *buf = gst_buffer_ref((GstBuffer *)origBuf);
-  EGLint attr[] = {
-      EGL_GL_VIDEO_FOURCC_TI,      m_format,
-      EGL_GL_VIDEO_WIDTH_TI,       m_width,
-      EGL_GL_VIDEO_HEIGHT_TI,      m_height,
-      EGL_GL_VIDEO_BYTE_SIZE_TI,   GST_BUFFER_SIZE(buf),
-      // TODO: pick proper YUV flags..
-      EGL_GL_VIDEO_YUV_FLAGS_TI,   EGLIMAGE_FLAGS_YUV_CONFORMANT_RANGE |
-                                   EGLIMAGE_FLAGS_YUV_BT601,
-      EGL_NONE
-  };
-  return eglCreateImageKHR(g_Windowing.GetEGLDisplay(),
-      EGL_NO_CONTEXT, EGL_RAW_VIDEO_TI, GST_BUFFER_DATA(buf), attr);
-}
-
-void CDVDVideoCodecGStreamer::ReleaseEGLImage(EGLImageKHR eglImage, void *origBuf)
-{
-  GstBuffer *buf = (GstBuffer *)origBuf;
-  eglDestroyImageKHR(g_Windowing.GetEGLDisplay(), eglImage);
-  gst_buffer_unref(buf);
 }
 
 void CDVDVideoCodecGStreamer::SetDropState(bool bDrop)

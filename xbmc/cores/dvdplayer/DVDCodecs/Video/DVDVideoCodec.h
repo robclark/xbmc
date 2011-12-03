@@ -44,6 +44,13 @@ struct OpenMaxVideoBuffer;
   struct __CVBuffer;
 #endif
 
+class EGLImageHandle
+{
+public:
+  virtual ~EGLImageHandle() {}
+  virtual EGLImageKHR Get() = 0;
+};
+
 // should be entirely filled by all codecs
 struct DVDVideoPicture
 {
@@ -80,13 +87,7 @@ struct DVDVideoPicture
 
   // XXX move this into union, and use instead of data/iLineSize!!
     struct {
-      /* to allow the decoder to hold a reference to the original
-       * buffer that the eglImage was created from:
-       */
-      void *origBuf;
-      /* to implement unref of buffer:
-       */
-      CDVDVideoCodec *decoder;
+      EGLImageHandle *eglImageHandle;
     };
 
   unsigned int iFlags;
@@ -199,6 +200,8 @@ public:
    */ 
   virtual bool ClearPicture(DVDVideoPicture* pDvdVideoPicture)
   {
+//    if (pDvdVideoPicture->eglImageHandle)
+//      delete pDvdVideoPicture->eglImageHandle;
     memset(pDvdVideoPicture, 0, sizeof(DVDVideoPicture));
     return true;
   }
@@ -213,29 +216,6 @@ public:
     pDvdVideoUserData->data = NULL;
     pDvdVideoUserData->size = 0;
     return false;
-  }
-
-  /*
-   * Allow the decoder that supports eglImage to return an eglImage.  The
-   * decoder should put some sort of handle (or whatever it prefers) in to
-   * pDvdVideoPicture->origBuf.  This gets converted to an EGLImage by this
-   * method for buffers that the renderer will actually display (ie. not
-   * dropped).  And released by ::ReleaseEGLImage after they are rendered.
-   * This allows the decoder maximum flexibility, ie. up front creation of
-   * all the eglBuffers, or wrapping codec buffers after decode.
-   */
-  virtual EGLImageKHR GetEGLImage(void *origBuf)
-  {
-    return NULL; /* default not supported */
-  }
-
-  /*
-   * allow the decoder that supports eglImage to release the eglImage
-   * (if needed)
-   */
-  virtual void ReleaseEGLImage(EGLImageKHR eglImage, void *origBuf)
-  {
-    /* default no-op */
   }
 
   /*
