@@ -53,8 +53,30 @@
 #endif
 #include <EGL/eglext.h>
 
+static inline int debug_enabled(void)
+{
+  static int enabled = -1;
+  if (enabled == -1)
+  {
+    char *str = getenv("XBMC_DEBUG");
+    enabled = str && strstr(str, "render");
+  }
+  return enabled;
+}
+
 #ifdef HAVE_LIBGSTREAMER
 #include <gst/gst.h>
+#define DBG(fmt, ...) do { \
+    if (debug_enabled()) \
+    printf("%"GST_TIME_FORMAT"\t%s:%d\t"fmt"\n", \
+        GST_TIME_ARGS(gst_util_get_timestamp()), \
+        __PRETTY_FUNCTION__, __LINE__, ##__VA_ARGS__); \
+  } while (0)
+#else
+#define DBG(fmt, ...) do { \
+    if (debug_enabled()) \
+    printf("%s:%d\t"fmt"\n", __PRETTY_FUNCTION, __LINE__, ##__VA_ARGS__); \
+  } while (0)
 #endif
 
 /* for debug */
@@ -137,7 +159,7 @@ void CLinuxRendererGLES::UnRefBuf(int index)
   YUVBUFFER &buf = m_buffers[index];
   if (buf.eglImageHandle)
   {
-    delete buf.eglImageHandle;
+    buf.eglImageHandle->UnRef();
     buf.eglImageHandle = NULL;
   }
 }
@@ -840,6 +862,8 @@ void CLinuxRendererGLES::RenderSinglePass(int index, int field)
   YUVFIELDS &fields = buf.fields;
   YUVPLANES &planes = fields[field];
 
+  DBG("render %d: %f", index, buf.pts);
+
   if (m_reloadShaders)
   {
     m_reloadShaders = 0;
@@ -1396,6 +1420,8 @@ void CLinuxRendererGLES::UploadEGLIMAGETexture(int index)
   YV12Image &im     = buf.image;
   YUVFIELDS &fields = buf.fields;
   YUVPLANE  &plane  = fields[0][0];   /* for eglimageexternal, use only one texture */
+
+  DBG("upload %d: %f", index, buf.pts);
 
 #if defined(HAVE_LIBOPENMAX)
   if (!(im.flags&IMAGE_FLAG_READY) || buf.openMaxBuffer)
@@ -2062,6 +2088,7 @@ void CLinuxRendererGLES::AddProcessor(DVDVideoPicture *picture)
   YUVFIELDS &fields = buf.fields;
   YUVPLANE  &plane  = fields[0][0];   /* for eglimageexternal, use only one texture */
 
+  DBG("add: %p", picture->eglImageHandle);
   UnRefBuf(index);
 
   im.cropX      = picture->iDisplayX;
@@ -2072,8 +2099,8 @@ void CLinuxRendererGLES::AddProcessor(DVDVideoPicture *picture)
   im.height     = m_sourceHeight;
   im.cshift_x   = 1;
   im.cshift_y   = 1;
-  buf.eglImageHandle = picture->eglImageHandle;
-  picture->eglImageHandle = NULL;
+  buf.pts       = picture->pts;
+  buf.eglImageHandle = picture->eglImageHandle->Ref();
 
   plane.texwidth  = im.width;
   plane.texheight = im.height;
@@ -2083,6 +2110,8 @@ void CLinuxRendererGLES::AddProcessor(DVDVideoPicture *picture)
     plane.texwidth  = NP2(plane.texwidth);
     plane.texheight = NP2(plane.texheight);
   }
+
+  DBG("add %d: %f", index, buf.pts);
 
   // some sanity checking for now.. I plan to move the eglImage related
   // stuff into the union, but need to be sure that no one is still using

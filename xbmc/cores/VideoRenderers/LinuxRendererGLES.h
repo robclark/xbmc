@@ -255,6 +255,7 @@ protected:
     YV12Image image;
     unsigned  flipindex; /* used to decide if this has been uploaded */
 
+    double pts; // for debugging A/V sync in rendering
     EGLImageHandle *eglImageHandle;
 
 #ifdef HAVE_LIBOPENMAX

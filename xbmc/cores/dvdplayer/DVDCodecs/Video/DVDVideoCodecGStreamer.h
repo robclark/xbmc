@@ -48,6 +48,7 @@ public:
   void OnEnoughData();
 
 private:
+  virtual void Flush();
   static GstCaps *CreateVideoCaps(CDVDStreamInfo &hints, CDVDCodecOptions &options);
 
   static bool gstinitialized;
@@ -57,6 +58,8 @@ private:
   // crop parameters
   bool m_crop;
   gint m_cropTop, m_cropLeft, m_cropWidth, m_cropHeight;
+
+  gboolean m_drop, m_reset;
 
   // caps parameters:
   gint m_width, m_height;

@@ -59,29 +59,42 @@ class GSTEGLImageHandle : public EGLImageHandle
 {
 public:
   GSTEGLImageHandle(GstBuffer *buf, gint width, gint height, guint32 format)
+    : EGLImageHandle()
   {
     this->eglImage = NULL;
-    this->buf = buf;
+    this->buf = gst_buffer_ref(buf);
     this->width = width;
     this->height = height;
     this->format = format;
+    this->refcnt = 1;
   }
 
   virtual ~GSTEGLImageHandle()
   {
     if (eglImage)
-    {
       eglDestroyImageKHR(g_Windowing.GetEGLDisplay(), eglImage);
-      gst_buffer_unref(buf);
-    }
+    gst_buffer_unref(buf);
   }
 
-protected:
+  virtual EGLImageHandle * Ref()
+  {
+    CSingleLock lock(m_monitorLock);
+    refcnt++;
+    return this;
+  }
+
+  void UnRef()
+  {
+    CSingleLock lock(m_monitorLock);
+    --refcnt;
+    if (refcnt == 0)
+      delete this;
+  }
+
   virtual EGLImageKHR Get()
   {
     if (!eglImage)
     {
-      GstBuffer *buf = gst_buffer_ref(this->buf);
       EGLint attr[] = {
           EGL_GL_VIDEO_FOURCC_TI,      format,
           EGL_GL_VIDEO_WIDTH_TI,       width,
@@ -99,11 +112,14 @@ protected:
   }
 
 private:
+  static CCriticalSection m_monitorLock;
+  int refcnt;
   EGLImageKHR eglImage;
   gint width, height;
   guint32 format;
   GstBuffer *buf;
 };
+CCriticalSection GSTEGLImageHandle::m_monitorLock;
 
 
 CDVDVideoCodecGStreamer::CDVDVideoCodecGStreamer()
@@ -128,6 +144,8 @@ CDVDVideoCodecGStreamer::CDVDVideoCodecGStreamer()
   m_AppSrcCaps = NULL;
   m_AppSinkCaps = NULL;
   m_ptsinvalid = true;
+  m_drop = false;
+  m_reset = false;
 
   m_timebase = 1000.0;
 }
@@ -154,7 +172,7 @@ bool CDVDVideoCodecGStreamer::Open(CDVDStreamInfo &hints, CDVDCodecOptions &opti
   return (m_AppSrc != NULL);
 }
 
-void CDVDVideoCodecGStreamer::Dispose()
+void CDVDVideoCodecGStreamer::Flush()
 {
   while (m_pictureQueue.size())
   {
@@ -167,6 +185,11 @@ void CDVDVideoCodecGStreamer::Dispose()
     gst_buffer_unref(m_pictureBuffer);
     m_pictureBuffer = NULL;
   }
+}
+
+void CDVDVideoCodecGStreamer::Dispose()
+{
+  Flush();
 
   if (m_AppSrc)
   {
@@ -174,7 +197,7 @@ void CDVDVideoCodecGStreamer::Dispose()
     g_signal_emit_by_name(m_AppSrc, "end-of-stream", &ret);
 
     if (ret != GST_FLOW_OK)
-      printf("GStreamer: OnDispose. Flow error %i\n", ret);
+      ERR("Flow error %i", ret);
 
     gst_object_unref(m_AppSrc);
     m_AppSrc = NULL;
@@ -205,12 +228,21 @@ void CDVDVideoCodecGStreamer::Dispose()
 int CDVDVideoCodecGStreamer::Decode(BYTE* pData, int iSize, double dts, double pts)
 {
   CSingleLock lock(m_monitorLock);
-  usleep(100);
 
   GstBuffer *buffer = NULL;
 
+  if (pts == DVD_NOPTS_VALUE)
+    pts = dts;
+
   if (pData)
   {
+    if (m_reset)
+    {
+      m_decoder->Reset(dts, pts);
+      Flush();
+      m_reset = false;
+    }
+
     buffer = gst_buffer_new_and_alloc(iSize);
     if (buffer)
     {
@@ -218,18 +250,21 @@ int CDVDVideoCodecGStreamer::Decode(BYTE* pData, int iSize, double dts, double p
 
       GST_BUFFER_TIMESTAMP(buffer) = pts * 1000.0;
 
+      DBG("push buffer: %"GST_TIME_FORMAT", dts=%f, pts=%f",
+          GST_TIME_ARGS(GST_BUFFER_TIMESTAMP(buffer)), dts, pts);
+
       GstFlowReturn ret;
       g_signal_emit_by_name(m_AppSrc, "push-buffer", buffer, &ret);
 
       if (ret != GST_FLOW_OK)
-        printf("GStreamer: OnDecode. Flow error %i\n", ret);
+        ERR("Flow error %i", ret);
 
       gst_buffer_unref(buffer);
     }
   }
 
   if (m_pictureBuffer)
- {
+  {
     gst_buffer_unref(m_pictureBuffer);
     m_pictureBuffer = NULL;
   }
@@ -242,7 +277,7 @@ int CDVDVideoCodecGStreamer::Decode(BYTE* pData, int iSize, double dts, double p
 
 void CDVDVideoCodecGStreamer::Reset()
 {
-  m_crop = false;
+  m_reset = true;
 }
 
 bool CDVDVideoCodecGStreamer::GetPicture(DVDVideoPicture* pDvdVideoPicture)
@@ -259,7 +294,7 @@ bool CDVDVideoCodecGStreamer::GetPicture(DVDVideoPicture* pDvdVideoPicture)
   GstCaps *caps = gst_buffer_get_caps(m_pictureBuffer);
   if (caps == NULL)
   {
-    printf("GStreamer: No caps on decoded buffer\n");
+    ERR("No caps on decoded buffer");
     return false;
   }
 
@@ -276,7 +311,7 @@ bool CDVDVideoCodecGStreamer::GetPicture(DVDVideoPicture* pDvdVideoPicture)
         !gst_structure_get_int (structure, "height", &m_height) ||
         !gst_structure_get_fourcc (structure, "format", &m_format))
     {
-      printf("GStreamer: invalid caps on decoded buffer\n");
+      ERR("invalid caps on decoded buffer");
       gst_caps_unref(m_AppSinkCaps);
       m_AppSinkCaps = NULL;
       return false;
@@ -294,7 +329,7 @@ bool CDVDVideoCodecGStreamer::GetPicture(DVDVideoPicture* pDvdVideoPicture)
     if ((m_format != GST_STR_FOURCC("NV12")) &&
         (m_format != GST_STR_FOURCC("I420")))
     {
-      printf("GStreamer: invalid color format on decoded buffer\n");
+      ERR("invalid color format on decoded buffer");
       gst_caps_unref(m_AppSinkCaps);
       m_AppSinkCaps = NULL;
       return false;
@@ -325,14 +360,18 @@ bool CDVDVideoCodecGStreamer::GetPicture(DVDVideoPicture* pDvdVideoPicture)
 
   pDvdVideoPicture->eglImageHandle = new GSTEGLImageHandle(m_pictureBuffer, m_width, m_height, m_format);
   pDvdVideoPicture->format  = DVDVideoPicture::FMT_EGLIMG;
-  pDvdVideoPicture->pts       = (double)GST_BUFFER_TIMESTAMP(m_pictureBuffer) / 1000.0;
+  pDvdVideoPicture->pts     = (double)GST_BUFFER_TIMESTAMP(m_pictureBuffer) / 1000.0;
+  pDvdVideoPicture->dts     = DVD_NOPTS_VALUE;
   pDvdVideoPicture->iDuration = (double)GST_BUFFER_DURATION(m_pictureBuffer) / 1000.0;
+
+  DBG("create %p (%f)", pDvdVideoPicture->eglImageHandle, pDvdVideoPicture->pts);
 
   return true;
 }
 
 void CDVDVideoCodecGStreamer::SetDropState(bool bDrop)
 {
+  m_drop = bDrop;
 }
 
 const char *CDVDVideoCodecGStreamer::GetName()
@@ -351,9 +390,19 @@ void CDVDVideoCodecGStreamer::OnCrop(gint top, gint left, gint width, gint heigh
 
 void CDVDVideoCodecGStreamer::OnDecodedBuffer(GstBuffer *buffer)
 {
+  if (m_drop || m_reset)
+  {
+    DBG("dropping! drop=%d, reset=%d", m_drop, m_reset);
+    gst_buffer_unref (buffer);
+    return;
+  }
+
   /* throttle decoding if rendering is not keeping up.. */
   while (m_pictureQueue.size() > 4)
+  {
+//    DBG("throttling: %d", m_pictureQueue.size());
     usleep(1000);
+  }
 
   if (buffer)
   {
@@ -361,7 +410,7 @@ void CDVDVideoCodecGStreamer::OnDecodedBuffer(GstBuffer *buffer)
     m_pictureQueue.push(buffer);
   }
   else
-    printf("GStreamer: Received null buffer?\n");
+    ERR("Received null buffer?");
 }
 
 void CDVDVideoCodecGStreamer::OnNeedData()
@@ -394,7 +443,7 @@ GstCaps *CDVDVideoCodecGStreamer::CreateVideoCaps(CDVDStreamInfo &hints, CDVDCod
       }
       break;
     default:
-      printf("GStreamer: codec: unkown = %i\n", hints.codec);
+      ERR("codec: unknown = %i", hints.codec);
       break;
   }
 
@@ -418,6 +467,8 @@ GstCaps *CDVDVideoCodecGStreamer::CreateVideoCaps(CDVDStreamInfo &hints, CDVDCod
       gst_buffer_unref(data);
     }
   }
+
+  DBG("got caps: %"GST_PTR_FORMAT, caps);
 
   return caps;
 }

@@ -22,6 +22,7 @@
  */
 
 #include "system.h"
+#include "threads/SingleLock.h"
 
 #include <vector>
 
@@ -47,8 +48,15 @@ struct OpenMaxVideoBuffer;
 class EGLImageHandle
 {
 public:
-  virtual ~EGLImageHandle() {}
+  EGLImageHandle()
+  {
+  }
+  virtual ~EGLImageHandle()
+  {
+  }
   virtual EGLImageKHR Get() = 0;
+  virtual EGLImageHandle * Ref() = 0;
+  virtual void UnRef() = 0;
 };
 
 // should be entirely filled by all codecs
@@ -200,8 +208,8 @@ public:
    */ 
   virtual bool ClearPicture(DVDVideoPicture* pDvdVideoPicture)
   {
-//    if (pDvdVideoPicture->eglImageHandle)
-//      delete pDvdVideoPicture->eglImageHandle;
+    if (pDvdVideoPicture->eglImageHandle)
+      pDvdVideoPicture->eglImageHandle->UnRef();
     memset(pDvdVideoPicture, 0, sizeof(DVDVideoPicture));
     return true;
   }

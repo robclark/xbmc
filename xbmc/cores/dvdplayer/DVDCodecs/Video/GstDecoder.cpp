@@ -46,11 +46,15 @@ GstElement *CGstDecoder::Open(GstCaps *sourceCapabilities)
 
   gchar *capsString = gst_caps_to_string(sourceCapabilities);
 
-  printf("GStreamer: The capabilities from source are %s\n", capsString);
+  DBG("The capabilities from source are %s", capsString);
 
-  gchar *pipelineString = g_strdup_printf("appsrc caps=\"%s\" name=\"AppSrc\" ! decodebin2 ! ffmpegcolorspace ! appsink caps=\"video/x-raw-yuv,format=(fourcc){I420,NV12}\" name=\"AppSink\"", capsString);
+  gchar *pipelineString = g_strdup_printf(
+      "appsrc caps=\"%s\" name=\"AppSrc\" stream-type=seekable format=time block=(boolean)true ! "
+      "decodebin2 ! ffmpegcolorspace ! "
+      "appsink caps=\"video/x-raw-yuv,format=(fourcc){I420,NV12}\" name=\"AppSink\" max-buffers=3",
+      capsString);
 
-  printf("GStreamer: Entire pipeline is %s\n", pipelineString);
+  DBG("Entire pipeline is %s", pipelineString);
 
   m_pipeline = gst_parse_launch(pipelineString, NULL);
   g_free(capsString);
@@ -64,16 +68,20 @@ GstElement *CGstDecoder::Open(GstCaps *sourceCapabilities)
   gst_object_unref (bus);
 
   GstElement *AppSrc = gst_bin_get_by_name(GST_BIN(m_pipeline), "AppSrc");
+  m_AppSrc = AppSrc;
 
   if (AppSrc)
   {
     g_signal_connect(AppSrc, "need-data", G_CALLBACK (OnNeedData), this);
     g_signal_connect(AppSrc, "enough-data", G_CALLBACK (OnEnoughData), this);
+    g_signal_connect(AppSrc, "seek-data", G_CALLBACK (OnSeekData), this);
   }
   else
-    printf("GStreamer: Failure to hook up to AppSrc\n");
+    ERR("Failure to hook up to AppSrc");
 
   GstElement *AppSink = gst_bin_get_by_name(GST_BIN(m_pipeline), "AppSink");
+  m_AppSink = AppSink;
+
   if (AppSink)
   {
     g_object_set(G_OBJECT(AppSink), "emit-signals", TRUE, "sync", FALSE, NULL);
@@ -82,7 +90,7 @@ GstElement *CGstDecoder::Open(GstCaps *sourceCapabilities)
     gst_object_unref(AppSink);
   }
   else
-    printf("GStreamer: Failure to hook up to AppSink\n");
+    ERR("Failure to hook up to AppSink");
 
   Create();
 
@@ -93,6 +101,14 @@ void CGstDecoder::StopThread(bool bWait)
 {
   g_main_loop_quit(m_loop);
   CThread::StopThread(bWait);
+}
+
+void CGstDecoder::Reset(double dts, double pts)
+{
+  GstClockTime time = pts * 1000.0;
+  DBG("Seeking to: %"GST_TIME_FORMAT, GST_TIME_ARGS(time));
+  gst_element_seek(m_AppSrc, 1.0, GST_FORMAT_TIME, GST_SEEK_FLAG_FLUSH,
+      GST_SEEK_TYPE_SET, time, GST_SEEK_TYPE_NONE, 0);
 }
 
 void CGstDecoder::Process()
@@ -118,13 +134,15 @@ void CGstDecoder::OnDecodedBuffer(GstElement *appsink, void *data)
   GstBuffer *buffer = gst_app_sink_pull_buffer(GST_APP_SINK(appsink));
   if (buffer)
   {
+    DBG("got buffer: %"GST_TIME_FORMAT, GST_TIME_ARGS(GST_BUFFER_TIMESTAMP(buffer)));
+
     if (decoder->m_callback)
       decoder->m_callback->OnDecodedBuffer(buffer);
     else
       gst_buffer_unref(buffer);
   }
   else
-    printf("GStreamer: OnDecodedBuffer - Null Buffer\n");
+    DBG("Null Buffer");
 }
 
 void CGstDecoder::OnNeedData(GstElement *appsrc, guint size, void *data)
@@ -145,6 +163,11 @@ void CGstDecoder::OnEnoughData (GstElement *appsrc, void *data)
     decoder->m_callback->OnEnoughData();
 }
 
+gboolean CGstDecoder::OnSeekData(GstElement *appsrc, guint64 arg, void *data)
+{
+  return TRUE;
+}
+
 gboolean CGstDecoder::BusCallback(GstBus *bus, GstMessage *msg, gpointer data)
 {
   CGstDecoder *decoder = (CGstDecoder *)data;
@@ -153,7 +176,7 @@ gboolean CGstDecoder::BusCallback(GstBus *bus, GstMessage *msg, gpointer data)
   switch (GST_MESSAGE_TYPE(msg))
   {
     case GST_MESSAGE_EOS:
-      g_print ("GStreamer: End of stream\n");
+      DBG("End of stream");
       g_main_loop_quit(decoder->m_loop);
       break;
 
@@ -163,7 +186,7 @@ gboolean CGstDecoder::BusCallback(GstBus *bus, GstMessage *msg, gpointer data)
       gst_message_parse_error (msg, &error, &str);
       g_free (str);
 
-      g_printerr ("GStreamer: Error - %s %s\n", str, error->message);
+      ERR("Error - %s %s", str, error->message);
       g_error_free (error);
 
       g_main_loop_quit(decoder->m_loop);
@@ -175,7 +198,7 @@ gboolean CGstDecoder::BusCallback(GstBus *bus, GstMessage *msg, gpointer data)
       gst_message_parse_error (msg, &warning, &str);
       g_free (str);
 
-      g_printerr ("GStreamer: Warning - %s %s\n", str, warning->message);
+      ERR("Warning - %s %s", str, warning->message);
       g_error_free (warning);
       break;
 
@@ -185,83 +208,36 @@ gboolean CGstDecoder::BusCallback(GstBus *bus, GstMessage *msg, gpointer data)
       gst_message_parse_error (msg, &info, &str);
       g_free (str);
 
-      g_printerr ("GStreamer: Info - %s %s\n", str, info->message);
+      DBG("Info - %s %s", str, info->message);
       g_error_free (info);
       break;
 
-    case GST_MESSAGE_TAG:
-      printf("GStreamer: Message TAG\n");
-      break;
-    case GST_MESSAGE_BUFFERING:
-      printf("GStreamer: Message BUFFERING\n");
-      break;
     case GST_MESSAGE_STATE_CHANGED:
-      printf("GStreamer: Message STATE_CHANGED\n");
+    {
+      /* dump graph for pipeline state changes */
       GstState old_state, new_state;
-      
+      gchar *state_transition_name;
+
       gst_message_parse_state_changed (msg, &old_state, &new_state, NULL);
-      printf("GStreamer: Element %s changed state from %s to %s.\n",
-          GST_OBJECT_NAME (msg->src),
+
+      state_transition_name = g_strdup_printf ("%s_%s",
           gst_element_state_get_name (old_state),
           gst_element_state_get_name (new_state));
+
+      gchar *dump_name = g_strconcat ("xbmc.", state_transition_name, NULL);
+      DBG("dumping: %s", dump_name);
+      GST_DEBUG_BIN_TO_DOT_FILE_WITH_TS (GST_BIN (decoder->m_pipeline),
+          GST_DEBUG_GRAPH_SHOW_ALL, dump_name);
+      DBG("done");
+
+      g_free (dump_name);
+      g_free (state_transition_name);
+
       break;
-    case GST_MESSAGE_STATE_DIRTY:
-      printf("GStreamer: Message STATE_DIRTY\n");
-      break;
-    case GST_MESSAGE_STEP_DONE:
-      printf("GStreamer: Message STEP_DONE\n");
-      break;
-    case GST_MESSAGE_CLOCK_PROVIDE:
-      printf("GStreamer: Message CLOCK_PROVIDE\n");
-      break;
-    case GST_MESSAGE_CLOCK_LOST:
-      printf("GStreamer: Message CLOCK_LOST\n");
-      break;
-    case GST_MESSAGE_NEW_CLOCK:
-      printf("GStreamer: Message NEW_CLOCK\n");
-      break;
-    case GST_MESSAGE_STRUCTURE_CHANGE:
-      printf("GStreamer: Message STRUCTURE_CHANGE\n");
-      break;
-    case GST_MESSAGE_STREAM_STATUS:
-      printf("GStreamer: Message STREAM_STATUS\n");
-      break;
-    case GST_MESSAGE_APPLICATION:
-      printf("GStreamer: Message APPLICATION\n");
-      break;
-    case GST_MESSAGE_ELEMENT:
-      printf("GStreamer: Message ELEMENT\n");
-      break;
-    case GST_MESSAGE_SEGMENT_START:
-      printf("GStreamer: Message SEGMENT_START\n");
-      break;
-    case GST_MESSAGE_SEGMENT_DONE:
-      printf("GStreamer: Message SEGMENT_DONE\n");
-      break;
-    case GST_MESSAGE_DURATION:
-      printf("GStreamer: Message DURATION\n");
-      break;
-    case GST_MESSAGE_LATENCY:
-      printf("GStreamer: Message LATENCY\n");
-      break;
-    case GST_MESSAGE_ASYNC_START:
-      printf("GStreamer: Message ASYNC_START\n");
-      break;
-    case GST_MESSAGE_ASYNC_DONE:
-      printf("GStreamer: Message ASYNC_DONE\n");
-      break;
-    case GST_MESSAGE_REQUEST_STATE:
-      printf("GStreamer: Message REQUEST_STATE\n");
-      break;
-    case GST_MESSAGE_STEP_START:
-      printf("GStreamer: Message STEP_START\n");
-      break;
-    case GST_MESSAGE_QOS:
-      printf("GStreamer: Message QOS\n");
-      break;
+    }
 
     default:
-      printf("GStreamer: Unknown message %i\n", GST_MESSAGE_TYPE(msg));
+      DBG("%"GST_PTR_FORMAT, msg);
       break;
   }
 
