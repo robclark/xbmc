@@ -146,6 +146,8 @@ CDVDVideoCodecGStreamer::CDVDVideoCodecGStreamer()
   m_ptsinvalid = true;
   m_drop = false;
   m_reset = false;
+  m_error = false;
+  m_crop = false;
 
   m_timebase = 1000.0;
 }
@@ -160,6 +162,10 @@ bool CDVDVideoCodecGStreamer::Open(CDVDStreamInfo &hints, CDVDCodecOptions &opti
   Dispose();
 
   m_ptsinvalid = hints.ptsinvalid;
+  m_drop = false;
+  m_reset = false;
+  m_error = false;
+  m_crop = false;
 
   m_AppSrcCaps = CreateVideoCaps(hints, options);
 
@@ -230,6 +236,12 @@ int CDVDVideoCodecGStreamer::Decode(BYTE* pData, int iSize, double dts, double p
   CSingleLock lock(m_monitorLock);
 
   GstBuffer *buffer = NULL;
+
+  if (m_error)
+  {
+    m_error = false;
+    return VC_ERROR;
+  }
 
   if (pts == DVD_NOPTS_VALUE)
     pts = dts;
@@ -400,7 +412,7 @@ void CDVDVideoCodecGStreamer::OnDecodedBuffer(GstBuffer *buffer)
   /* throttle decoding if rendering is not keeping up.. */
   while (m_pictureQueue.size() > 4)
   {
-//    DBG("throttling: %d", m_pictureQueue.size());
+    DBG("throttling: %d", m_pictureQueue.size());
     usleep(1000);
   }
 
@@ -423,9 +435,15 @@ void CDVDVideoCodecGStreamer::OnEnoughData()
   m_needData = false;
 }
 
+void CDVDVideoCodecGStreamer::OnError(const gchar *message)
+{
+  m_error = true;
+}
+
 GstCaps *CDVDVideoCodecGStreamer::CreateVideoCaps(CDVDStreamInfo &hints, CDVDCodecOptions &options)
 {
   GstCaps *caps = NULL;
+  int version = 0;
 
   switch (hints.codec)
   {
@@ -433,14 +451,27 @@ GstCaps *CDVDVideoCodecGStreamer::CreateVideoCaps(CDVDStreamInfo &hints, CDVDCod
       caps = gst_caps_new_simple ("video/x-h264", NULL);
       break;
     case CODEC_ID_MPEG4:
+      version++;
+      version++;
+    case CODEC_ID_MPEG2VIDEO:
+      version++;
+    case CODEC_ID_MPEG1VIDEO:
+      version++;
       caps = gst_caps_new_simple ("video/mpeg", NULL);
       if (caps)
       {
         gst_caps_set_simple(caps,
-            "mpegversion", G_TYPE_INT, 4,
+            "mpegversion", G_TYPE_INT, version,
             "systemstream", G_TYPE_BOOLEAN, false,
+            "parsed", G_TYPE_BOOLEAN, true,
             NULL);
       }
+      break;
+    case CODEC_ID_VP6:
+      caps = gst_caps_new_simple ("video/x-vp6", NULL);
+      break;
+    case CODEC_ID_VP6F:
+      caps = gst_caps_new_simple ("video/x-vp6-flash", NULL);
       break;
     default:
       ERR("codec: unknown = %i", hints.codec);

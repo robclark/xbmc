@@ -30,7 +30,7 @@ static inline int debug_enabled(void)
   if (enabled == -1)
   {
     char *str = getenv("XBMC_DEBUG");
-    enabled = str && strstr(str, "decoder");
+    enabled = str && strstr(str, "decode");
   }
   return enabled;
 }
@@ -55,6 +55,7 @@ public:
   virtual void OnDecodedBuffer(GstBuffer *buffer) = 0;
   virtual void OnNeedData() = 0;
   virtual void OnEnoughData() = 0;
+  virtual void OnError(const gchar *message) = 0;
 };
 
 class CGstDecoder : public CThread

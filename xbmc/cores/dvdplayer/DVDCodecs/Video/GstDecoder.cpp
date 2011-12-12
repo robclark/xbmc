@@ -190,6 +190,10 @@ gboolean CGstDecoder::BusCallback(GstBus *bus, GstMessage *msg, gpointer data)
       g_error_free (error);
 
       g_main_loop_quit(decoder->m_loop);
+
+      if (decoder->m_callback)
+        decoder->m_callback->OnError(error->message);
+
       break;
 
     case GST_MESSAGE_WARNING:

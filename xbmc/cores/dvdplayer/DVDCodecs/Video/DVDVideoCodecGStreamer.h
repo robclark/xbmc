@@ -46,6 +46,7 @@ public:
   void OnDecodedBuffer(GstBuffer *buffer);
   void OnNeedData();
   void OnEnoughData();
+  void OnError(const gchar *message);
 
 private:
   virtual void Flush();
@@ -59,7 +60,7 @@ private:
   bool m_crop;
   gint m_cropTop, m_cropLeft, m_cropWidth, m_cropHeight;
 
-  gboolean m_drop, m_reset;
+  gboolean m_drop, m_reset, m_error;
 
   // caps parameters:
   gint m_width, m_height;
