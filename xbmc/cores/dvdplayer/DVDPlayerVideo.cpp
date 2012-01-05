@@ -573,11 +573,13 @@ void CDVDPlayerVideo::Process()
         // check for a new picture
         if (iDecoderState & VC_PICTURE)
         {
+          do {
+            // note: decoder may have multiple buffers to return to us, so
+            // keep popping out buffers until there are no more:
+            m_pVideoCodec->ClearPicture(&picture);
+            if (! m_pVideoCodec->GetPicture(&picture))
+              break;
 
-          // try to retrieve the picture (should never fail!), unless there is a demuxer bug ofcours
-          m_pVideoCodec->ClearPicture(&picture);
-          if (m_pVideoCodec->GetPicture(&picture))
-          {
             sPostProcessType.clear();
 
             picture.iGroupId = pPacket->iGroupId;
@@ -699,12 +701,7 @@ void CDVDPlayerVideo::Process()
               iDropped = 0;
 
             bRequestDrop = (iResult & EOS_VERYLATE) == EOS_VERYLATE;
-          }
-          else
-          {
-            CLog::Log(LOGWARNING, "Decoder Error getting videoPicture.");
-            m_pVideoCodec->Reset();
-          }
+          } while (true);
         }
 
         /*

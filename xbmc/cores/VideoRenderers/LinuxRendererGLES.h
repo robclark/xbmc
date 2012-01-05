@@ -44,7 +44,7 @@ namespace Shaders { class BaseYUV2RGBShader; }
 namespace Shaders { class BaseVideoFilterShader; }
 class COpenMaxVideo;
 
-#define NUM_BUFFERS 5
+#define NUM_BUFFERS 3
 
 
 #undef ALIGN

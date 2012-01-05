@@ -70,7 +70,6 @@ private:
   GstCaps *m_AppSinkCaps;
 
   std::queue<GstBuffer *> m_pictureQueue;
-  GstBuffer *m_pictureBuffer;
 
   CCriticalSection m_needBuffer;
   CCriticalSection m_monitorLock;

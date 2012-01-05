@@ -49,9 +49,9 @@ GstElement *CGstDecoder::Open(GstCaps *sourceCapabilities)
   DBG("The capabilities from source are %s", capsString);
 
   gchar *pipelineString = g_strdup_printf(
-      "appsrc caps=\"%s\" name=\"AppSrc\" stream-type=seekable format=time block=(boolean)true ! "
+      "appsrc caps=\"%s\" name=\"AppSrc\" stream-type=seekable format=time max-bytes=4096 ! "
       "decodebin2 ! ffmpegcolorspace ! "
-      "appsink caps=\"video/x-raw-yuv,format=(fourcc){I420,NV12}\" name=\"AppSink\" max-buffers=3",
+      "appsink caps=\"video/x-raw-yuv,format=(fourcc){I420,NV12}\" name=\"AppSink\"",
       capsString);
 
   DBG("Entire pipeline is %s", pipelineString);
