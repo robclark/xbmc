@@ -273,8 +273,11 @@ bool CPlayerCoreFactory::LoadConfiguration(TiXmlElement* pConfig, bool clear)
     s_vecCoreConfigs.push_back(dvdplayer);
 
      // Don't remove this, its a placeholder for the old MPlayer core, it would break scripts
-    CPlayerCoreConfig* mplayer = new CPlayerCoreConfig("oldmplayercore", EPC_DVDPLAYER, NULL);
-    s_vecCoreConfigs.push_back(mplayer);
+
+#if HAVE_LIBGSTREAMER
+    CPlayerCoreConfig* gstplayer = new CPlayerCoreConfig("GstPlayer", EPC_GSTPLAYER, NULL);
+    s_vecCoreConfigs.push_back(gstplayer);
+#endif
 
     CPlayerCoreConfig* paplayer = new CPlayerCoreConfig("PAPlayer", EPC_PAPLAYER, NULL);
     paplayer->m_bPlaysAudio = true;
@@ -304,6 +307,9 @@ bool CPlayerCoreFactory::LoadConfiguration(TiXmlElement* pConfig, bool clear)
 
       EPLAYERCORES eCore = EPC_NONE;
       if (type == "dvdplayer" || type == "mplayer") eCore = EPC_DVDPLAYER;
+#if HAVE_LIBGSTREAMER
+      if (type == "gstplayer") eCore = EPC_GSTPLAYER;
+#endif      
       if (type == "paplayer" ) eCore = EPC_PAPLAYER;
       if (type == "externalplayer" ) eCore = EPC_EXTPLAYER;
 
