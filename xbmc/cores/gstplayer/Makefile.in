@@ -1,0 +1,12 @@
+INCLUDES=-I../../.. -I. -I.. -I../../ -I../../linux -I../../utils -I../../../guilib -I../../lib -I../dvdplayer/Codecs/ffmpeg
+
+
+CXXFLAGS+=-D__STDC_FORMAT_MACROS 
+
+SRCS=	GstPlayer.cpp 
+
+LIB=	GstPlayer.a
+
+include ../../../Makefile.include
+-include $(patsubst %.cpp,%.P,$(patsubst %.c,%.P,$(SRCS)))
+
