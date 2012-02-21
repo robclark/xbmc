@@ -31,6 +31,8 @@ LASTSUCCESSFULSTART=$(date +%s)
 
 while [ $(( $LOOP )) = "1" ]
 do
+  # disabling dpms for video playback
+  xset -dpms
   $XBMC
   RET=$?
   NOW=$(date +%s)
