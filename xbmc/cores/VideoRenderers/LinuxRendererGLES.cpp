@@ -331,7 +331,7 @@ void CLinuxRendererGLES::LoadPlane( YUVPLANE& plane, int type, unsigned flipinde
   // OpenGL ES does not support strided texture input. Make a copy without stride
   if(stride != width)
   {
-    pixelVector = (char *)malloc(width * height * width);
+    pixelVector = (char *)malloc(width * height);
     
     const char *src = (const char *)data;
     char *dst = pixelVector;
