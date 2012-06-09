@@ -22,6 +22,7 @@
  */
 
 #include "system.h"
+#include "threads/SingleLock.h"
 
 #include <vector>
 
@@ -34,6 +35,7 @@
 
 namespace DXVA { class CSurfaceContext; }
 namespace VAAPI { struct CHolder; }
+class CDVDVideoCodec;
 class CVDPAU;
 class COpenMax;
 class COpenMaxVideo;
@@ -42,6 +44,20 @@ struct OpenMaxVideoBuffer;
   class CDVDVideoCodecVideoToolBox;
   struct __CVBuffer;
 #endif
+
+class EGLImageHandle
+{
+public:
+  EGLImageHandle()
+  {
+  }
+  virtual ~EGLImageHandle()
+  {
+  }
+  virtual EGLImageKHR Get() = 0;
+  virtual EGLImageHandle * Ref() = 0;
+  virtual void UnRef() = 0;
+};
 
 // should be entirely filled by all codecs
 struct DVDVideoPicture
@@ -77,6 +93,11 @@ struct DVDVideoPicture
 #endif
   };
 
+  // XXX move this into union, and use instead of data/iLineSize!!
+    struct {
+      EGLImageHandle *eglImageHandle;
+    };
+
   unsigned int iFlags;
 
   double       iRepeatPicture;
@@ -96,6 +117,7 @@ struct DVDVideoPicture
 
   unsigned int iWidth;
   unsigned int iHeight;
+  unsigned int iDisplayX, iDisplayY;
   unsigned int iDisplayWidth;  // width of the picture without black bars
   unsigned int iDisplayHeight; // height of the picture without black bars
 
@@ -109,6 +131,7 @@ struct DVDVideoPicture
     FMT_VAAPI,
     FMT_OMXEGL,
     FMT_CVBREF,
+    FMT_EGLIMG,
   } format;
 };
 
@@ -185,6 +208,8 @@ public:
    */ 
   virtual bool ClearPicture(DVDVideoPicture* pDvdVideoPicture)
   {
+    if (pDvdVideoPicture->eglImageHandle)
+      pDvdVideoPicture->eglImageHandle->UnRef();
     memset(pDvdVideoPicture, 0, sizeof(DVDVideoPicture));
     return true;
   }

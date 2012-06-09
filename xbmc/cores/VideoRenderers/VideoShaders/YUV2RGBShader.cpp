@@ -263,6 +263,62 @@ BaseYUV2RGBARBShader::BaseYUV2RGBARBShader(unsigned flags)
 }
 #endif
 
+
+//////////////////////////////////////////////////////////////////////
+// EGLImageExternalShader - YUV2RGB GL_OES_EGL_image_external extension
+// NOTE: this is a bit ugly, because don't have separate Y/U/V textures
+// (we just hijack the Y texture for now), and don't really have all
+// these other parameters (CSC matrix, etc..)
+//////////////////////////////////////////////////////////////////////
+
+EGLImageExternalShader::EGLImageExternalShader()
+{
+#ifdef HAS_GL
+#  error "Is this supported in GL??"
+#elif HAS_GLES == 2
+
+  m_width   = 1;
+  m_height  = 1;
+  m_hYTex   = -1;
+  m_hVertex = -1;
+  m_hYcoord = -1;
+  m_hProj   = -1;
+  m_hModel  = -1;
+  m_hAlpha  = -1;
+
+  VertexShader()->LoadSource("yuv2rgb_vertex_egl_image_external_gles.glsl", m_defines);
+  PixelShader()->LoadSource("yuv2rgb_egl_image_external_gles.glsl", m_defines);
+#endif
+}
+
+void EGLImageExternalShader::OnCompiledAndLinked()
+{
+  m_hAlpha  = glGetUniformLocation(ProgramHandle(), "m_alpha");
+  m_hProj   = glGetUniformLocation(ProgramHandle(), "m_proj");
+  m_hModel  = glGetUniformLocation(ProgramHandle(), "m_model");
+  m_hVertex = glGetAttribLocation(ProgramHandle(),  "m_attrpos");
+  m_hYcoord = glGetAttribLocation(ProgramHandle(),  "m_attrcord");
+  m_hYTex   = glGetUniformLocation(ProgramHandle(), "m_samp");
+
+printf("m_hVertex=%d, m_hYcoord=%d, m_hYTex=%d\n", m_hVertex, m_hYcoord, m_hYTex);
+printf("m_hAlpha=%d, m_hProj=%d, m_hModel=%d", m_hAlpha, m_hProj, m_hModel);
+
+  VerifyGLState();
+}
+
+bool EGLImageExternalShader::OnEnabled()
+{
+  // set shader attributes once enabled
+  glUniform1i(m_hYTex, 0);
+  glUniformMatrix4fv(m_hProj,  1, GL_FALSE, m_proj);
+  glUniformMatrix4fv(m_hModel, 1, GL_FALSE, m_model);
+  glUniform1f(m_hAlpha, m_alpha);
+
+  VerifyGLState();
+  return true;
+}
+
+
 //////////////////////////////////////////////////////////////////////
 // YUV2RGBProgressiveShader - YUV2RGB with no deinterlacing
 // Use for weave deinterlacing / progressive

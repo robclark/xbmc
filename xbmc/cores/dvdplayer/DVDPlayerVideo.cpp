@@ -1052,6 +1052,10 @@ int CDVDPlayerVideo::OutputPicture(const DVDVideoPicture* src, double pts)
         flags |= CONF_FLAGS_FORMAT_CVBREF;
         formatstr = "BGRA";
         break;
+      case DVDVideoPicture::FMT_EGLIMG:
+        flags |= CONF_FLAGS_FORMAT_EGLIMG;
+        formatstr = "EGLIMG";
+        break;
     }
 
     if(m_bAllowFullscreen)

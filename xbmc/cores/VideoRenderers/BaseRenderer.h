@@ -32,8 +32,9 @@ typedef struct YV12Image
   BYTE *   plane[MAX_PLANES];
   int      planesize[MAX_PLANES];
   unsigned stride[MAX_PLANES];
-  unsigned width;
-  unsigned height;
+  unsigned cropX, cropY;          /* crop position */
+  unsigned cropWidth, cropHeight; /* crop dimensions */
+  unsigned width, height;         /* original dimensions */
   unsigned flags;
 
   unsigned cshift_x; /* this is the chroma shift used */
