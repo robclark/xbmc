@@ -1468,7 +1468,7 @@ if test "x$use_gstreamer" != "xno"; then
     AC_SUBST(gstreamer_req, 0.10.0)
     AC_SUBST(gstreamer_plugins_base_req, 0.10.0)
     PKG_CHECK_MODULES(GSTREAMER, gstreamer-0.10 >= $gstreamer_req, HAVE_GSTREAMER=1, HAVE_GSTREAMER=0)
-    PKG_CHECK_MODULES(GSTREAMER_BASE, gstreamer-base-0.10 >= $gstreamer_req, HAVE_GSTREAMER_BASE=1, HAVE_GSTREAMER_BASE=0)
+    PKG_CHECK_MODULES(GSTREAMER_BASE, gstreamer-base-0.10 >= $gstreamer_req gstreamer-video-0.10 gstreamer-dmabuf-0.10, HAVE_GSTREAMER_BASE=1, HAVE_GSTREAMER_BASE=0)
     PKG_CHECK_MODULES(GSTREAMER_PLUGINS_BASE, gstreamer-plugins-base-0.10 >= $gstreamer_plugins_base_req, HAVE_GSTREAMER_PLUGINS_BASE=1, HAVE_GSTREAMER_PLUGINS_BASE=0)
     HAVE_GSTREAMER_APP=1
     AC_CHECK_LIB([gstapp-0.10], main, , HAVE_GSTREAMER_APP=0)

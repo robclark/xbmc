@@ -173,4 +173,6 @@ private:
   CStdString      m_username;
   CStdString      m_password;
   std::map<CStdString, CStdString> m_requestheaders;
+
+  static void InitEglImage();
 };
